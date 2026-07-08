@@ -8,23 +8,6 @@ from typing import Union
 from abc import abstractmethod
 
 
-@dataclass
-class ModelArgs:
-    d_model: int
-    n_layer: int
-    d_state: int = 16
-    expand: int = 1
-    dt_rank: Union[int, str] = 'auto'
-    d_conv: int = 4
-    pad_vocab_size_multiple: int = 8
-    conv_bias: bool = True
-    bias: bool = False
-
-    def __post_init__(self):
-        self.d_inner = int(self.expand * self.d_model)
-        if self.dt_rank == 'auto':
-            self.dt_rank = math.ceil(self.d_model / 16)
-
 
 class MambaBlock(nn.Module):
     def __init__(self, args: ModelArgs):
@@ -93,7 +76,6 @@ class CCBiM(nn.Module):
         self.args = args
         self.mamba1 = MambaBlock(args)
         self.mamba2 = MambaBlock(args)
-        self.mamba3 = MambaBlock(args)
         self.norm1 = RMSNorm(args.d_model)
         self.norm2 = RMSNorm(args.d_model)
 
@@ -131,7 +113,6 @@ class CCBiM(nn.Module):
         x2_flip = rearrange(x2_flip, 'b d_in l -> b l d_in')
         x2_flip = F.silu(x2_flip)
 
-        A = -torch.exp(self.mamba3.A_log.float())
         A1 = -torch.exp(self.mamba1.A_log.float())
         D1 = self.mamba1.D.float()
         A2 = -torch.exp(self.mamba2.A_log.float())
@@ -201,8 +182,6 @@ class M2B_Mamba(nn.Module):
         config = ModelArgs(d_model=90, n_layer=1)
         self.mamba1 = CCBiM(config)
         self.mamba2 = CCBiM(config)
-        self.mamba3 = MambaBlock(config)
-        self.mamba4 = MambaBlock(config)
         self.conv1 = nn.Conv1d(in_channels=90, out_channels=1, kernel_size=1)
         self.linear1 = nn.Linear(90, 1)
         self.linear2 = nn.Linear(90, 1)
@@ -251,11 +230,9 @@ class M2B_Mamba(nn.Module):
         self.sf_ = self.linear2(self.sf_).permute(0, 2, 1).contiguous()
 
         self.ff_bn = self.batch_norm(self.ff_)
-        self.ff_ssm = self.mamba3.ssm(self.conv_list[0](self.mlp_list[0](self.ff_bn)))
         self.ff_act = F.relu(self.mlp_list[1](self.ff_bn))
 
         self.sf_bn = self.batch_norm(self.sf_)
-        self.sf_ssm = self.mamba4.ssm(self.conv_list[1](self.mlp_list[2](self.sf_bn)))
         self.sf_act = F.relu(self.mlp_list[3](self.sf_bn))
 
         ff_last = self.mlp_list[4]((self.ff_ssm * self.ff_act + self.sf_ssm * self.ff_act)) + self.ff_
