@@ -1,0 +1,9 @@
+batch_size: 16
+
+num_epochs: 150
+
+lr: 0.001
+
+seed: 42
+
+split_num: 5
